@@ -47,29 +47,32 @@ function App() {
 
   // Create a new note
   async function createNote() {
-    if (!formData.name || !formData.description) return;
+  if (!formData.name || !formData.description) return;
 
-    let imageKey;
-    if (formData.image) {
-      imageKey = `${Date.now()}-${formData.image.name}`;
-      await uploadData({
-        key: imageKey,
-        data: formData.image,
-      }).result;
-    }
+  let imageKey;
+  if (formData.image) {
+    // Get the signed-in user’s sub (unique ID)
+    const user = await getCurrentUser();
+    const userSub = user.userId; // This is the Cognito identity (sub)
 
-    try {
-      await client.models.Note.create({
-        name: formData.name,
-        description: formData.description,
-        image: imageKey,
-      });
-      setFormData({ name: '', description: '', image: null });
-      fetchNotes();
-    } catch (err) {
-      console.error('Error creating note:', err);
-    }
+    // Put the file in their media/ folder
+    imageKey = `media/${userSub}/${Date.now()}-${formData.image.name}`;
+
+    await uploadData({
+      key: imageKey,
+      data: formData.image,
+    }).result;
   }
+
+  await client.models.Note.create({
+    name: formData.name,
+    description: formData.description,
+    image: imageKey,
+  });
+
+  setFormData({ name: '', description: '', image: null });
+  fetchNotes();
+}
 
   // Delete a note
   async function deleteNote(id) {
