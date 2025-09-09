@@ -1,127 +1,146 @@
-import { useState, useEffect } from "react";
+// src/App.jsx
+import React, { useEffect, useState } from 'react';
+import { Amplify } from 'aws-amplify';
+import outputs from './amplify_outputs.json';
 import {
- Authenticator,
- Button,
- Text,
- TextField,
- Heading,
- Flex,
- View,
- Grid,
- Divider,
-} from "@aws-amplify/ui-react";
-import { Amplify } from "aws-amplify";
-import "@aws-amplify/ui-react/styles.css";
-import { generateClient } from "aws-amplify/data";
-import outputs from "../amplify_outputs.json";
-/**
- * @type {import('aws-amplify/data').Client<import('../amplify/data/
-resource').Schema>}
- */
+  Authenticator,
+  View,
+  Image,
+  Text,
+  TextField,
+  Button,
+  Flex,
+  Heading
+} from '@aws-amplify/ui-react';
+import '@aws-amplify/ui-react/styles.css';
+import { generateClient } from 'aws-amplify/data';
+import { uploadData, getUrl } from 'aws-amplify/storage';
+
+// Configure Amplify with generated outputs
 Amplify.configure(outputs);
-const client = generateClient({
- authMode: "userPool",
-});
-export default function App() {
- const [expenses, setExpenses] = useState([]);
- useEffect(() => {
- client.models.Expense.observeQuery().subscribe({
- next: (data) => setExpenses([...data.items]),
- });
- }, []);
- async function createExpense(event) {
- event.preventDefault();
- const form = new FormData(event.target);
- await client.models.Expense.create({
- name: form.get("name"),
- amount: form.get("amount"),
- });
- event.target.reset();
- }
- async function deleteExpense({ id }) {
- const toBeDeletedExpense = {
- id,
- };
- await client.models.Expense.delete(toBeDeletedExpense);
- }
- return (
- <Authenticator>
- {({ signOut }) => (
- <Flex
- className="App"
- justifyContent="center"
- alignItems="center"
- direction="column"
- width="70%"
- margin="0 auto"
- >
- <Heading level={1}>Expense Tracker</Heading>
- <View as="form" margin="3rem 0" onSubmit={createExpense}>
- <Flex
- direction="column"
- justifyContent="center"
- gap="2rem"
- padding="2rem"
- >
- <TextField
- name="name"
- placeholder="Expense Name"
- label="Expense Name"
- labelHidden
- variation="quiet"
- required
- />
- <TextField
- name="amount"
- placeholder="Expense Amount"
- label="Expense Amount"
- type="float"
- labelHidden
- variation="quiet"
- required
- />
- <Button type="submit" variation="primary">
- Create Expense
- </Button>
- </Flex>
- </View>
- <Divider />
- <Heading level={2}>Expenses</Heading>
- <Grid
- margin="3rem 0"
- autoFlow="column"
- justifyContent="center"
- gap="2rem"
- alignContent="center"
- >
- {expenses.map((expense) => (
- <Flex
- key={expense.id || expense.name}
- direction="column"
- justifyContent="center"
- alignItems="center"
- gap="2rem"
- border="1px solid #ccc"
- padding="2rem"
- borderRadius="5%"
- className="box"
- >
- <View>
- <Heading level="3">{expense.name}</Heading>
- </View>
- <Text fontStyle="italic">${expense.amount}</Text>
- <Button
- variation="destructive"
- onClick={() => deleteExpense(expense)}
- >
- Delete note
- </Button>
- </Flex>
- ))}
- </Grid>
- <Button onClick={signOut}>Sign Out</Button>
- </Flex>
- )}
- </Authenticator>
- );
+
+// Create a GraphQL client
+const client = generateClient();
+
+function App() {
+  const [notes, setNotes] = useState([]);
+  const [formData, setFormData] = useState({ name: '', description: '', image: null });
+
+  // Fetch notes from backend
+  async function fetchNotes() {
+    try {
+      const noteData = await client.models.Note.list();
+      const notesWithImages = await Promise.all(
+        noteData.data.map(async (note) => {
+          if (note.image) {
+            const url = await getUrl({ key: note.image });
+            note.imageUrl = url.url;
+          }
+          return note;
+        })
+      );
+      setNotes(notesWithImages);
+    } catch (err) {
+      console.error('Error fetching notes:', err);
+    }
+  }
+
+  // Create a new note
+  async function createNote() {
+    if (!formData.name || !formData.description) return;
+
+    let imageKey;
+    if (formData.image) {
+      imageKey = `${Date.now()}-${formData.image.name}`;
+      await uploadData({
+        key: imageKey,
+        data: formData.image,
+      }).result;
+    }
+
+    try {
+      await client.models.Note.create({
+        name: formData.name,
+        description: formData.description,
+        image: imageKey,
+      });
+      setFormData({ name: '', description: '', image: null });
+      fetchNotes();
+    } catch (err) {
+      console.error('Error creating note:', err);
+    }
+  }
+
+  // Delete a note
+  async function deleteNote(id) {
+    try {
+      await client.models.Note.delete({ id });
+      fetchNotes();
+    } catch (err) {
+      console.error('Error deleting note:', err);
+    }
+  }
+
+  useEffect(() => {
+    fetchNotes();
+  }, []);
+
+  return (
+    <Authenticator>
+      {({ signOut, user }) => (
+        <View className="App" padding="1rem">
+          <Flex justifyContent="space-between" alignItems="center" marginBottom="1rem">
+            <Heading level={3}>Hello, {user.username}</Heading>
+            <Button onClick={signOut}>Sign out</Button>
+          </Flex>
+
+          <Flex direction="column" gap="0.5rem" marginBottom="1rem">
+            <TextField
+              placeholder="Note name"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            />
+            <TextField
+              placeholder="Note description"
+              value={formData.description}
+              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+            />
+            <input
+              type="file"
+              onChange={(e) => setFormData({ ...formData, image: e.target.files[0] })}
+            />
+            <Button onClick={createNote}>Create Note</Button>
+          </Flex>
+
+          <View>
+            {notes.map((note) => (
+              <Flex
+                key={note.id}
+                direction="column"
+                border="1px solid #ddd"
+                borderRadius="8px"
+                padding="1rem"
+                marginBottom="1rem"
+              >
+                <Text fontWeight="bold">{note.name}</Text>
+                <Text>{note.description}</Text>
+                {note.imageUrl && (
+                  <Image src={note.imageUrl} alt={note.name} width="200px" />
+                )}
+                <Button
+                  variation="destructive"
+                  onClick={() => deleteNote(note.id)}
+                  marginTop="0.5rem"
+                >
+                  Delete note
+                </Button>
+              </Flex>
+            ))}
+          </View>
+        </View>
+      )}
+    </Authenticator>
+  );
 }
+
+export default App;
